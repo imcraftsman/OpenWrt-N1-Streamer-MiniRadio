@@ -94,3 +94,66 @@ autostart_radio.sh - 查看脚本源码
 [ ] 扩充全球高清音频流源 (STATIONS 数组优化)
 
 [ ] 开发基于 Web 的控制 UI 页面
+
+## N1-Radio: 自动化网络收音机项目阶段总结
+本项目致力于在基于 LEDE/OpenWrt 系统的斐讯 N1 盒子上，构建一个全自动、高可靠性的网络广播播放系统。以下是现阶段已实现的核心功能与技术突破：
+
+### 🚀 核心成就概览
+1. 动态音频源自动化抓取
+API 集成：成功对接 de2.api.radio-browser.info 开源电台数据库。
+
+精准过滤：实现了基于 tags（如 news, jazz）及电台名称关键词的自动化筛选机制，确保音频流质量。
+
+本地化持久化：抓取到的 1000+ 电台元数据自动保存为本地 radio_data.json，减少了对 API 的频繁请求。
+
+2. 播放列表（M3U）智能管理
+原子化同步：Python 脚本自动将 JSON 数据转换为标准的 global.m3u 播放列表格式。
+
+动态更新机制：实现了每次启动时自动清理旧列表并重新注入新列表的功能，确保电台链接的时效性。
+
+绝对路径补齐：解决了 MPD 对播放列表存放路径的严格要求，通过 Python 自动维护 /tmp/lib/mpd/playlists/ 目录结构。
+
+3. 系统级 MPD 进程自主受控
+启动权回收：通过 disable 系统默认的 mpd 初始化脚本，彻底解决了系统原生启动项无法加载外部 URL 的问题。
+
+自愈式启动逻辑：
+
+环境修复：脚本运行前自动检测并创建缺失的数据库文件、状态文件及 PID 目录，消除 No such file 报错。
+
+独立进程托管：放弃了不稳定的 subprocess 管道模式，改用 os.system("/usr/bin/mpd /etc/mpd.conf &") 实现 MPD 进程的彻底脱离与常驻。
+
+端口探测技术：引入了基于 mpc version 的轮询探测机制，确保在 MPD 端口完全监听后再进行列表注入，提高了启动成功率。
+
+4. 深度配置优化（Conf Tuning）
+抗抖动处理：将音频缓冲区（audio_buffer_size）从默认值提升至 8192KB，显著缓解了跨境电台流的卡顿问题。
+
+超时断舍离：配置 connection_timeout "10"，防止 MPD 进程因尝试连接无效 URL 而陷入无限期僵死（Timeout）状态。
+
+日志重定向：将日志文件由内存或磁盘持久区重定向至 /tmp/mpd.log，既保护了 N1 的 Flash 寿命，又实现了实时故障排查。
+
+### 🛠 技术栈
+宿主系统：LEDE / OpenWrt (Phicomm N1)
+
+后端语言：Python 3
+
+服务组件：Music Player Daemon (MPD) / MPC
+
+数据格式：JSON / M3U / ALSA (Audio)
+
+### 本阶段成果： 
+ 1）修改 /etc/mpd.conf
+ 
+ 2）新增 fetch_set_playlist.py
+ 
+ 3）执行：/etc/init.d/mpd disable 停止系统对mpd启动。 本地启动项增加  
+ 
+ #收音机
+ 
+(sleep 10 && python /root/fetch_set_playlist.py) &
+
+📈 下一阶段目标
+[ ] Web 控制端：开发 radio.html，实现手机端远程选台。
+
+[ ] 精简化播放：实现电台分类筛选功能。
+
+[ ] 稳定性监控：增加脚本自动检测 MPD 状态并自动重启的守护逻辑。
