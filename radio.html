@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>N1 Radio V2.6 Pro Info</title>
+    <style>
+        :root { --accent: #00ff80; --bg: #0a0a0a; --panel: #161616; --lcd: #1d2b1d; }
+        body { background: var(--bg); color: #eee; margin: 0; font-family: sans-serif; display: flex; height: 100vh; overflow: hidden; }
+
+        /* --- 侧边栏 --- */
+        #sidebar { width: 320px; background: var(--panel); border-right: 1px solid #333; display: flex; flex-direction: column; flex-shrink: 0; transition: transform 0.3s ease; z-index: 1000; }
+        @media (max-width: 768px) { #sidebar { position: absolute; left: 0; top: 0; bottom: 0; transform: translateX(-100%); } #sidebar.active { transform: translateX(0); box-shadow: 10px 0 50px #000; } }
+        .menu-scroll { flex: 1; overflow-y: auto; }
+        .cat-label { padding: 18px 15px; background: #222; color: var(--accent); font-size: 18px; cursor: pointer; border-bottom: 1px solid #111; }
+        .sub-label { padding: 15px 25px; background: #1a1a1a; color: #aaa; font-size: 16px; cursor: pointer; border-bottom: 1px solid #222; }
+        .st-item { padding: 15px 20px 15px 45px; font-size: 16px; color: #777; cursor: pointer; border-bottom: 1px solid #111; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        
+        /* 正在播放项的状态 */
+        .st-item.active { color: var(--accent); background: #000; border-left: 5px solid var(--accent); }
+        
+        /* 键盘/焦点选中的样式 */
+        .active-focus { background: rgba(0, 255, 128, 0.15) !important; color: white !important; }
+
+        .sub-group, .st-list { display: none; }
+        .open > .sub-group, .open > .st-list { display: block; }
+
+        /* --- 主界面 --- */
+        #main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; width: 100%; padding: 10px; }
+        #menu-toggle { 
+            position: absolute; 
+            left: 15px; 
+            top: 25px; 
+            z-index: 900; 
+            font-size: 28px; 
+            cursor: pointer; 
+            color: var(--accent); 
+            display: block; /* 默认显示 */
+        }
+        /* 当侧边栏处于 active 状态时，隐藏按钮（防止重叠） */
+        body:has(#sidebar.active) #menu-toggle {
+            display: none;
+        }
+        
+        /* 针对电脑端的大屏幕适配 */
+        @media (min-width: 769px) {
+            /* 如果侧边栏没开，主界面向左对齐一点，给按钮留空间 */
+            body:not(:has(#sidebar.active)) #main {
+                padding-left: 60px;
+            }
+        }
+
+        /* --- LCD 屏幕 --- */
+        .lcd-frame { width: 95%; max-width: 550px; background: #2a2a2a; padding: 12px; border-radius: 15px; border: 3px solid #333; box-shadow: 0 20px 40px #000; }
+        .lcd-screen { 
+            background: var(--lcd); height: 220px; border-radius: 8px; box-shadow: inset 0 0 40px #000; 
+            display: grid;
+            grid-template-areas: "top-l top-r" "body-l body-r" "bot-l bot-r";
+            grid-template-columns: 120px 1fr;
+            grid-template-rows: 30px 1fr 40px;
+            padding: 10px; box-sizing: border-box; color: var(--accent);
+        }
+
+        .lcd-top-l { grid-area: top-l; font-size: 11px; opacity: 0.8; }
+        .lcd-top-r { grid-area: top-r; font-size: 11px; text-align: right; letter-spacing: 1px; }
+        .lcd-body-l { grid-area: body-l; display: flex; align-items: center; justify-content: center; }
+        #station-logo { width: 80px; height: 80px; background: #111; border: 1px solid #333; border-radius: 10px; object-fit: cover; }
+        .lcd-body-r { grid-area: body-r; display: flex; flex-direction: column; justify-content: center; overflow: hidden; padding-left: 10px; }
+        #artist-name { font-size: 13px; opacity: 0.9; text-transform: uppercase; margin-bottom: 5px; }
+        #track-container { width: 100%; overflow: hidden; white-space: nowrap; display: flex; }
+        .marquee-text { display: inline-block; min-width: 100%; animation: marquee-seamless 12s linear infinite; font-size: 22px; font-weight: bold; text-shadow: 0 0 10px rgba(0,255,128,0.5); padding-right: 300px; }
+
+        .lcd-bot-l { grid-area: bot-l; display: flex; align-items: center; font-size: 12px; font-weight: bold; }
+        .lcd-bot-r { grid-area: bot-r; display: flex; align-items: flex-end; justify-content: flex-end; }
+
+        @keyframes marquee-seamless { 0% { transform: translateX(0); } 100% { transform: translateX(-100%); } }
+
+        .visualizer { display: flex; align-items: flex-end; gap: 3px; height: 25px; }
+        .bar { width: 4px; background: linear-gradient(to top, #00ff80, #ccff00); opacity: 0.8; }
+        .bar:nth-child(1) { animation: bounce 0.43s infinite alternate 0.1s; } 
+        .bar:nth-child(2) { animation: bounce 0.67s infinite alternate 0.3s; } 
+        .bar:nth-child(3) { animation: bounce 0.35s infinite alternate 0.0s; } 
+        .bar:nth-child(4) { animation: bounce 0.78s infinite alternate 0.2s; } 
+        .bar:nth-child(5) { animation: bounce 0.52s infinite alternate 0.4s; } 
+        @keyframes bounce { from { height: 4px; } to { height: 25px; } }
+
+        .controls { margin-top: 25px; display: flex; gap: 12px; }
+        .btn { background: #222; border: 1px solid #444; color: white; padding: 14px 22px; border-radius: 8px; cursor: pointer; min-width: 90px; }
+        .btn.primary { color: var(--accent); border-color: var(--accent); }
+        /* 优化音量控制区，支持横屏自动缩放 */
+        /* 音量区域容器 */
+        .volume-box { 
+            margin-top: 25px; 
+            width: 85%; 
+            max-width: 320px; 
+            display: flex; 
+            align-items: center; 
+            gap: 12px; 
+            background: rgba(255,255,255,0.05); /* 增加淡淡的底色 */
+            padding: 8px 15px;
+            border-radius: 20px;
+        }
+        .vol-text { font-size: 11px; color: var(--accent); font-weight: bold; opacity: 0.8; }
+        /* 更酷的音量条 */
+        input[type=range] { 
+            flex: 1; 
+            appearance: none; 
+            height: 6px; 
+            background: #333; 
+            border-radius: 5px; 
+            outline: none; 
+        }
+        input[type=range]::-webkit-slider-thumb { 
+            appearance: none; 
+            width: 18px; height: 18px; 
+            background: var(--accent); 
+            border-radius: 50%; 
+            cursor: pointer; 
+            box-shadow: 0 0 10px var(--accent); 
+        }
+        /* 针对手机横屏的微调 */
+        @media (max-height: 500px) {
+        #main { padding: 5px; justify-content: flex-start; overflow-y: auto; }
+            .lcd-frame { transform: scale(0.8); margin-top: -30px; margin-bottom: -20px; }
+            .controls { margin-top: 0px; }
+            .volume-box { margin-top: 10px; margin-bottom: 30px; }
+        }
+
+        /* 强制隐藏侧边栏的类 (解决苹果横屏问题) */
+        #sidebar.force-hide { transform: translateX(-100%) !important; }
+
+        .flash-active { animation: highlight-glow 0.8s ease-in-out 2; }
+        @keyframes highlight-glow { 0% { background-color: transparent; } 50% { background-color: var(--accent); color: #000; } 100% { background-color: #000; color: var(--accent); } }
+    </style>
+</head>
+<body>
+
+<div id="menu-toggle" onclick="toggleSidebar()">☰</div>
+
+<div id="sidebar">
+    <div class="menu-header" style="display: flex; justify-content: space-between; align-items: center; padding: 20px; border-bottom: 1px solid #333;"> 
+        <span style="color:var(--accent); font-weight: bold;">N1 RADIO</span> 
+        <span onclick="closeSidebar()" style="font-size: 26px; cursor: pointer; color: var(--accent); padding: 0 10px;">✕</span>
+    </div>
+    <div class="menu-scroll" id="menu-tree"></div>
+</div>
+
+<div id="main">
+    <div class="lcd-frame">
+        <div class="lcd-screen">
+            <div class="lcd-top-l" id="conn-status">CONNECTED</div>
+            <div class="lcd-top-r" id="tech-specs">--- KBPS / -- KHZ</div>
+
+            <div class="lcd-body-l">
+                <img id="station-logo" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=">
+            </div>
+            <div class="lcd-body-r">
+                <div id="artist-name">STATION INFO</div>
+                <div id="track-container">
+                    <span id="track-name" class="marquee-text">WAITING...</span>
+                    <span id="track-name-copy" class="marquee-text">WAITING...</span>
+                </div>
+            </div>
+
+            <div class="lcd-bot-l" id="genre-tag">GENRE: N/A</div>
+            <div class="lcd-bot-r">
+                <div class="visualizer" id="viz" style="display:none;">
+                    <div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="controls">
+        <button class="btn" onclick="nav(-1)">PREV</button>
+        <button id="play-pause-btn" class="btn primary" onclick="togglePlay()">PLAY</button>
+        <button class="btn" onclick="nav(1)">NEXT</button>
+    </div>
+
+    <div class="volume-box">
+        <span class="vol-text">VOL</span>
+        <input type="range" id="vol-slider" min="0" max="100" value="85" oninput="setVolume(this.value)">
+        <span id="vol-num" style="min-width: 30px; font-size: 13px; color: var(--accent);">85</span>
+    </div>
+</div>
+
+<script>
+    let currentGroup = []; // 存储当前展开的小分类电台列表
+    let activeIdx = -1;    // 存储当前电台在 currentGroup 中的索引
+    let isPlaying = false;
+    window.lastSyncedId = null;
+    window.fullList = null;
+
+    // 修改 toggleSidebar，增加强制隐藏逻辑
+    function toggleSidebar() { 
+        const sb = document.getElementById('sidebar');
+        const toggleBtn = document.getElementById('menu-toggle');
+        
+        sb.classList.remove('force-hide'); 
+        sb.classList.toggle('active'); 
+
+        // 如果开启了侧边栏，隐藏 ☰ 按钮；否则显示
+        if (sb.classList.contains('active')) {
+            toggleBtn.style.display = 'none';
+        } else {
+            toggleBtn.style.display = 'block';
+        }
+    }
+    // 专门为 ✕ 按钮准备的关闭函数
+    function closeSidebar() {
+        const sb = document.getElementById('sidebar');
+        const toggleBtn = document.getElementById('menu-toggle');
+        
+        sb.classList.remove('active');
+        toggleBtn.style.display = 'block'; // 关键：关闭侧边栏后务必显示 ☰
+
+        // 处理 Safari 横屏强制隐藏逻辑
+        if (window.innerWidth > window.innerHeight) {
+            sb.classList.add('force-hide');
+        }
+    }
+    // 高亮正在播放的项并同步焦点
+    async function syncActiveStation(mpcId) {
+        if (!mpcId) return;
+        const targetEl = document.getElementById(`st-${mpcId}`);
+        if (targetEl) {
+            // 自动展开父级菜单
+            let parent = targetEl.closest('.st-list');
+            while (parent) { 
+                parent.parentElement.classList.add('open'); 
+                parent = parent.parentElement.closest('.sub-group') || parent.parentElement.closest('.st-list'); 
+            }
+            // 清理旧高亮
+            document.querySelectorAll('.st-item').forEach(el => el.classList.remove('active', 'flash-active', 'active-focus'));
+            // 设置新高亮
+            targetEl.classList.add('active', 'flash-active', 'active-focus');
+            targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    }
+
+    async function updateStatus() {
+        try {
+            const res = await fetch('/cgi-bin/radio_ctl.py?action=status');
+            const data = await res.json();
+            
+            // 同步音量滑块 (仅当滑块不在被拖动状态时同步，避免手感卡顿)
+            const slider = document.getElementById('vol-slider');
+            if (data.volume !== undefined && !window.isDraggingVol) {
+                slider.value = data.volume;
+                document.getElementById('vol-num').innerText = data.volume;
+            }
+            
+            isPlaying = data.playing;
+            document.getElementById('play-pause-btn').innerText = isPlaying ? "PAUSE" : "PLAY";
+            document.getElementById('viz').style.display = isPlaying ? "flex" : "none";
+            
+            const conn = document.getElementById('conn-status');
+            if (data.buffering) { 
+                conn.innerText = "BUFFERING..."; 
+                conn.style.color = "#ffcc00"; 
+            } else { 
+                conn.innerText = isPlaying ? "CONNECTED" : "STOPPED"; 
+                conn.style.color = "var(--accent)"; 
+            }
+
+            document.getElementById('tech-specs').innerText = `${data.bitrate} / ${data.sample}`;
+
+            if (data.title) {
+                const tName = data.title;
+                const aName = data.artist || "LIVE STREAM";
+                
+                if(document.getElementById('track-name').innerText !== tName) {
+                    document.getElementById('track-name').innerText = tName;
+                    document.getElementById('track-name-copy').innerText = tName;
+                    document.getElementById('artist-name').innerText = aName;
+                }
+                
+                if (data.id && window.lastSyncedId !== data.id) {
+                                // 1. 同步左侧 UI 高亮与滚动
+                                syncActiveStation(data.id);
+                                window.lastSyncedId = data.id;
+                                
+                                // 2. 关键：初始化键盘和按钮的“闭环”上下文
+                                initializeNavigationContext(data.id);
+                                
+                                // 3. 更新 Logo 和 Genre
+                                updateMetaFromTree(data.id);
+                            }
+            }
+            
+            // 为音量条增加拖拽状态判断
+            const volInput = document.getElementById('vol-slider');
+            volInput.onmousedown = () => window.isDraggingVol = true;
+            volInput.onmouseup = () => window.isDraggingVol = false;
+            volInput.ontouchstart = () => window.isDraggingVol = true;
+            volInput.ontouchend = () => window.isDraggingVol = false;
+        } catch(e) { console.error("Status update failed", e); }
+    }
+
+    function initializeNavigationContext(mpcId) {
+            if (!window.fullList) return;
+            for (let cat in window.fullList) {
+                for (let sub in window.fullList[cat]) {
+                    const subStations = window.fullList[cat][sub];
+                    const idx = subStations.findIndex(s => s.mpc_id == mpcId);
+                    
+                    if (idx !== -1) {
+                        // 找到了！给键盘导航喂数据
+                        currentGroup = subStations;
+                        activeIdx = idx;
+                        console.log(`导航上下文已同步: ${sub} (索引: ${idx})`);
+                        return;
+                    }
+                }
+            }
+        }
+
+    async function play(st) {
+        // 1. 立即给用户视觉反馈
+        document.getElementById('conn-status').innerText = "CONNECTING...";
+        document.getElementById('conn-status').style.color = "#ffcc00";
+        document.getElementById('track-name').innerText = "Initializing Stream...";
+        
+        // 2. 发送播放指令
+        const res = await fetch(`/cgi-bin/radio_ctl.py?action=play&id=${st.mpc_id}`);
+        
+        if (res.ok) {
+            // 3. 切换成功，立即手动同步一次 UI
+            window.lastSyncedId = st.mpc_id;
+            await updateStatus(); // 这里替代了 setTimeout
+        }
+    }
+
+    function updateMetaFromTree(mpcId) {
+        if (!window.fullList) return;
+        for (let cat in window.fullList) {
+            for (let sub in window.fullList[cat]) {
+                const found = window.fullList[cat][sub].find(s => s.mpc_id == mpcId);
+                if (found) {
+                    document.getElementById('genre-tag').innerText = `GENRE: ${sub.split(' (')[0]}`;
+                    if (found.icon_url) document.getElementById('station-logo').src = found.icon_url;
+                    else document.getElementById('station-logo').src = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+                    return;
+                }
+            }
+        }
+    }
+
+    function renderTree(tree) {
+        window.fullList = tree;
+        const container = document.getElementById('menu-tree');
+        container.innerHTML = '';
+        for (let m in tree) {
+            let mDiv = document.createElement('div');
+            mDiv.innerHTML = `<div class="cat-label" onclick="this.parentElement.classList.toggle('open')">${m}</div><div class="sub-group"></div>`;
+            for (let s in tree[m]) {
+                let sDiv = document.createElement('div');
+                sDiv.innerHTML = `<div class="sub-label" onclick="this.parentElement.classList.toggle('open')">├ ${s}</div><div class="st-list"></div>`;
+                
+                // 为该子分类下的所有电台绑定闭环点击事件
+                const subStations = tree[m][s];
+                subStations.forEach((st, idx) => {
+                    let item = document.createElement('div');
+                    item.className = 'st-item';
+                    item.id = `st-${st.mpc_id}`;
+                    item.innerText = st.name;
+                    item.onclick = (e) => { 
+                        e.stopPropagation(); 
+                        currentGroup = subStations; // 锁定当前分类组
+                        activeIdx = idx;           // 记录当前索引
+                        play(st); 
+                        updateMetaFromTree(st.mpc_id);
+                        syncActiveStation(st.mpc_id);
+                    };
+                    sDiv.lastElementChild.appendChild(item);
+                });
+                mDiv.lastElementChild.appendChild(sDiv);
+            }
+            container.appendChild(mDiv);
+        }
+    }
+
+    // 核心：统一的闭环切台逻辑 (键盘上下键 & PREV/NEXT)
+    function nav(step) {
+        if (!currentGroup || currentGroup.length === 0) return;
+        activeIdx = (activeIdx + step + currentGroup.length) % currentGroup.length;
+        const target = currentGroup[activeIdx];
+        play(target);
+        updateMetaFromTree(target.mpc_id);
+        syncActiveStation(target.mpc_id);
+    }
+
+    // 键盘监听：仅在最小分类内循环
+    document.addEventListener('keydown', function(e) {
+        if (!currentGroup || currentGroup.length === 0) return;
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            nav(1);
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            nav(-1);
+        } else if (e.key === 'Enter') {
+            // 回车键由于 nav 已经触发了 play，此处保持逻辑一致即可
+        }
+    });
+
+    async function togglePlay() { 
+        const action = isPlaying ? "pause" : "play"; 
+        await fetch(`/cgi-bin/radio_ctl.py?action=${action}`); 
+        updateStatus(); 
+    }
+    //音量设置
+    async function setVolume(v) { 
+        document.getElementById('vol-num').innerText = v;
+        // 只有当用户手动滑动时才发送请求
+        fetch(`/cgi-bin/radio_ctl.py?action=volume&value=${v}`); 
+    }
+
+    async function init() {
+            // 1. 先获取电台列表数据（这是所有逻辑的基石）
+            const res = await fetch('/cgi-bin/radio_ctl.py?action=get_list');
+            const tree = await res.json();
+            renderTree(tree); 
+            
+            // 初始化时，如果侧边栏没开，确保 ☰ 是出来的
+            const sb = document.getElementById('sidebar');
+            if (!sb.classList.contains('active')) {
+                document.getElementById('menu-toggle').style.display = 'block';
+            }
+
+            // 2. 立即执行一次状态更新（不等待 5 秒）
+            await updateStatus();
+
+            // 3. 开启定时轮询
+            setInterval(updateStatus, 10000);
+        }
+
+    window.onload = init;
+</script>
+</body>
+</html>
