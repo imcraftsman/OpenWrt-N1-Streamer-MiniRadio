@@ -65,46 +65,32 @@ def fetch_radio():
 
 
 def update_mpc_robust():
-    print("== [1/4] 环境自愈：补齐 MPD 运行目录 ==")
-    # 统一路径管理
+    print("== [1/4] 环境自愈：清洗旧数据与补齐目录 ==")
+    # 路径管理
     DIRS = ["/var/lib/mpd/music", "/var/lib/mpd/playlists", "/var/run/mpd", "/tmp/lib/mpd/playlists"]
     FILES = ["/var/lib/mpd/database", "/var/lib/mpd/state"]
+    mpc_path = "/usr/bin/mpc"
     
     for d in DIRS:
         if not os.path.exists(d):
             os.makedirs(d)
-            print(f"   已创建目录: {d}")
             
     for f in FILES:
         if not os.path.exists(f):
-            open(f, 'a').close() # 类似 touch
-            print(f"   已创建文件: {f}")
+            open(f, 'a').close()
 
     print("== [2/4] 进程管理：强制重启 MPD ==")
-    # 彻底清理可能残留的僵尸进程并启动
+    # 彻底清理残留进程
     subprocess.run(["killall", "-9", "mpd"], stderr=subprocess.DEVNULL)
     time.sleep(1)
-    #subprocess.run(["/usr/bin/mpd", "/etc/mpd.conf"], stderr=subprocess.DEVNULL)
-    # 增加 --stdout 参数通常不是必须，但关键是确保它能立即返回
-    #subprocess.run(["/usr/bin/mpd", "/etc/mpd.conf"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    #subprocess.Popen(["/usr/bin/mpd", "/etc/mpd.conf"])
-    # 使用 preexec_fn 确保脚本退出后 MPD 继续运行
-    #subprocess.Popen(["/usr/bin/mpd", "/etc/mpd.conf"], 
-                 # stdout=subprocess.DEVNULL, 
-                 # stderr=subprocess.DEVNULL,
-                 # preexec_fn=os.setpgrp)
-    # 【核心修改】使用 os.system 以后台方式启动，并强制加载配置文件
-    # 这样启动的 MPD 会直接挂在系统 init 进程下，不会随 Python 退出而退出
-    os.system("/usr/bin/mpd /etc/mpd.conf &")
     
-    # 给它一点启动时间
-    time.sleep(2)             
+    # 使用 os.system 后台启动，确保脱离 Python 进程树执行
+    os.system("/usr/bin/mpd /etc/mpd.conf &")
+    time.sleep(2) 
 
-
-    print("== [3/4] 状态探测：等待端口就绪 ==")
-    mpc_path = "/usr/bin/mpc"
+    print("== [3/4] 状态探测：等待 MPD 接口就绪 ==")
     ready = False
-    for i in range(20): # 最多等待 40 秒
+    for i in range(15): # 最多等待 30 秒
         check = subprocess.run([mpc_path, "version"], capture_output=True, text=True)
         if check.returncode == 0:
             print(f"   ✅ MPD 已就绪 (第 {i+1} 次尝试成功)")
@@ -113,13 +99,19 @@ def update_mpc_robust():
         time.sleep(2)
     
     if not ready:
-        print("   ❌ 错误：MPD 启动超时，请检查配置。")
+        print("   ❌ 错误：MPD 启动超时。")
         return
 
-    print("== [4/4] 注入列表：原子化同步 ==")
+    print("== [4/4] 注入列表：物理索引强制对齐 ==")
     JSON_SOURCE = "/www/radio_data.json"
     M3U_FILE = "/tmp/lib/mpd/playlists/global.m3u"
     
+    # 1. 强力清理
+    subprocess.run([mpc_path, "stop"], stdout=subprocess.DEVNULL)
+    subprocess.run([mpc_path, "clear"], stdout=subprocess.DEVNULL)
+    subprocess.run([mpc_path, "rm", "global"], stderr=subprocess.DEVNULL)
+    
+    # 2. 生成 M3U (保持与 JSON 严格一致)
     with open(JSON_SOURCE, 'r', encoding='utf-8') as f:
         stations = json.load(f)
 
@@ -129,21 +121,28 @@ def update_mpc_robust():
             f.write(f"#EXTINF:-1,{s['name']}\n")
             f.write(f"{s['url']}\n")
 
-    # 执行 MPC 事务
-    subprocess.run([mpc_path, "clear"], stdout=subprocess.DEVNULL)
-    subprocess.run([mpc_path, "update"], stdout=subprocess.DEVNULL)
-    time.sleep(2) # 关键：给 MPD 扫描物理文件的时间
+    # 3. 物理扫描
+    subprocess.run([mpc_path, "update", "--wait"], stdout=subprocess.DEVNULL)
     
+    # 4. 加载与模式设置
     res = subprocess.run([mpc_path, "load", "global"], capture_output=True, text=True)
     
     if res.returncode == 0:
-        # 设置初始音量并播放
+        # --- 模式锁定：解决跳台困惑的关键 ---
+        subprocess.run([mpc_path, "random", "off"], stdout=subprocess.DEVNULL)
+        subprocess.run([mpc_path, "repeat", "on"], stdout=subprocess.DEVNULL)
+        subprocess.run([mpc_path, "consume", "off"], stdout=subprocess.DEVNULL)
+        
+        # 【新增】开启单曲模式。这样如果 URL 挂了，它会停止或循环该 ID，而不会跳到下一行
+        subprocess.run([mpc_path, "single", "on"], stdout=subprocess.DEVNULL)
+        
         subprocess.run([mpc_path, "volume", "85"], stdout=subprocess.DEVNULL)
         subprocess.run([mpc_path, "play", "1"], stdout=subprocess.DEVNULL)
-        print(f"   ✅ 同步成功！加载电台: {len(stations)} 个")
-        print("== N1 网络收音机已进入工作状态 ==")
+        
+        print(f"   ✅ 同步成功！已开启 single 模式防止自动跳台,当前队列电台:{len(stations)}个")
+        print("== N1 网络收音机物理索引已重置对齐 ==")
     else:
-        print(f"   ❌ 加载失败: {res.stderr}")
+        print(f"   ❌ 列表加载失败: {res.stderr}")
 
 # import datetime
 
