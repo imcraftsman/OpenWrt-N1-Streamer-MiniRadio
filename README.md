@@ -226,3 +226,13 @@ API 集成：成功对接 de2.api.radio-browser.info 开源电台数据库。
 ---
 
 **© 2024 N1 Radio Project | 持续进化中...**
+
+#系统配置 文件：/etc/rc.local增加一下内容：
+
+# 恢复从 /etc/alsa/asound.state 读取的声卡音量与开关状态，防止开机静音
+# 核心功能：强制加载自定义生成的声卡配置文件
+# 适用场景：解决 N1 重启后 HDMI 音频自动变为静音(MM)的问题
+alsactl -f /etc/alsa/asound.state restore >/dev/null 2>&1
+
+#收音机
+(sleep 10 && python /root/fetch_set_playlist.py) &
